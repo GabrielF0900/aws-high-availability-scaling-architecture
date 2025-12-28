@@ -1,0 +1,486 @@
+# 🚀 Cluster Auto-Escalável na AWS - Arquitetura de Alta Disponibilidade
+
+Bem-vindo ao projeto de **Arquitetura de Alta Disponibilidade e Tolerante a Falhas na AWS**! Este documento documenta todo o processo de construção de uma infraestrutura cloud robusta, escalável e totalmente automatizada.
+
+---
+
+## 📋 Índice
+
+1. [Introdução](#introdução)
+2. [Arquitetura Geral](#arquitetura-geral)
+3. [Passo a Passo Completo](#passo-a-passo-completo)
+   - [VPC Multi-AZ](#vpc-multi-az)
+   - [Criação da AMI (Launch Template)](#criação-da-ami-launch-template)
+   - [Application Load Balancer](#application-load-balancer)
+   - [Auto Scaling Group](#auto-scaling-group)
+   - [Testes e Validação](#testes-e-validação)
+4. [Tecnologias Utilizadas](#tecnologias-utilizadas)
+5. [Diagrama de Arquitetura](#diagrama-de-arquitetura)
+
+---
+
+## 📖 Introdução
+
+Este projeto demonstra a criação de uma infraestrutura AWS altamente disponível, com capacidade de auto-escala automática. A arquitetura foi projetada para:
+
+✅ **Distribuir tráfego** entre múltiplas instâncias EC2  
+✅ **Garantir alta disponibilidade** em múltiplas Zonas de Disponibilidade (AZs)  
+✅ **Escalar automaticamente** quando a demanda aumentar  
+✅ **Recuperar automaticamente** de falhas de instâncias  
+✅ **Monitorar em tempo real** com CloudWatch  
+
+---
+
+## 🏗️ Arquitetura Geral
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     INTERNET / USUÁRIOS                      │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+            ┌────────────────────────┐
+            │  Application Load      │
+            │     Balancer (ALB)     │
+            │    (IP Público)        │
+            └───┬────────────────┬───┘
+                │                │
+        ┌───────▼───┐    ┌───────▼───┐
+        │  Subnet   │    │  Subnet   │
+        │  Pública  │    │  Pública  │
+        │   AZ-1    │    │   AZ-2    │
+        └───────────┘    └───────────┘
+                │                │
+        ┌───────▼────┐   ┌───────▼────┐
+        │ Subnet     │   │ Subnet     │
+        │ Privada    │   │ Privada    │
+        │  AZ-1      │   │  AZ-2      │
+        │ ┌────────┐ │   │ ┌────────┐ │
+        │ │ EC2    │ │   │ │ EC2    │ │
+        │ │ Inst.  │ │   │ │ Inst.  │ │
+        │ └────────┘ │   │ └────────┘ │
+        └────────────┘   └────────────┘
+              │                │
+              └────────┬───────┘
+                       │
+              ┌────────▼───────┐
+              │  Auto Scaling  │
+              │     Group      │
+              │  (Gerencia)    │
+              └────────────────┘
+```
+
+---
+
+## 🎯 Passo a Passo Completo
+
+### 1️⃣ VPC Multi-AZ
+
+#### Passo 1: Console AWS - Página Inicial
+Começamos pela página inicial do console da AWS, onde todo o magic acontece!
+
+![AWS Console Initial Page](assets/01-pagina-inicial.jpeg)
+
+#### Passo 2: Configuração da VPC
+Navegamos até o recurso de **VPC** e iniciamos a configuração da VPC multi-AZ para alta disponibilidade. Escolhemos a opção **"VPC e Muito Mais"** para um setup completo e robusto.
+
+![VPC Configuration Start](assets/02-configuracao-vpc.jpeg)
+
+**Configurações aplicadas:**
+- **Nome da VPC:** `vpc-cluster-auto-escalavel` (seu nome pode variar)
+- **Bloco CIDR:** `10.0.0.0/16` (oferece **65.536 endereços IP** para toda a VPC - mais que o suficiente!)
+
+#### Passo 3: Seleção de AZs
+Escolhemos **2 Zonas de Disponibilidade** para criar as subnets. As subnets são **ZONAIS**, ou seja, cada uma pertence a uma única AZ. Com subnets em múltiplas AZs, garantimos que a VPC seja realmente **Multi-AZ** e tolere falhas de zona inteira!
+
+![Multi-AZ Configuration](assets/03-mais-config-vpc.jpeg)
+
+**Topologia criada:**
+- 2 Subnets Públicas (uma por AZ)
+- 2 Subnets Privadas (uma por AZ)
+- NAT Gateway para acesso à internet das instâncias privadas
+
+#### Passo 4: NAT Gateway - Zonal vs Regional
+Inicialmente escolhemos NAT Gateway **Regional**, porém devido aos limites da escola na nuvem, voltamos e escolhemos a opção **Zonal**.
+
+![NAT Gateway Configuration](assets/04-outra-config-vpc.jpeg)
+
+O **NAT Gateway** é essencial! Ele permite que as instâncias nas subnets privadas façam:
+- ✅ Atualizações de patches
+- ✅ Download de pacotes de software
+- ✅ Comunicação com serviços externos
+
+Tudo isso mantendo as instâncias **protegidas** dentro da rede privada!
+
+#### Passo 5: VPC Criada com Sucesso! 🎉
+E assim, nossa VPC multi-AZ está pronta para receber todas as outras camadas da arquitetura!
+
+![VPC Created Successfully](assets/05-vpc-criada.jpeg)
+
+---
+
+### 2️⃣ Criação da AMI (Launch Template)
+
+#### Passo 6: Acessando EC2
+Navegamos até o recurso **EC2** para criar um **modelo de execução** (Launch Template) e uma **imagem AMI** pré-configurada que servirá como template para criar novas instâncias automaticamente via Auto Scaling.
+
+![EC2 Resource Page](assets/06-pagina-ec2.jpeg)
+
+#### Passo 7: Configuração da AMI - Nome e Descrição
+Iniciamos a configuração do Launch Template, adicionando:
+- **Nome:** Um identificador descritivo
+- **Descrição:** Contexto sobre a instância
+- ✅ **Habilitamos:** "Orientação sobre Auto Scaling" (fundamental!)
+
+![Launch Template Configuration](assets/07-config-AMI.jpeg)
+
+#### Passo 8: Sistema Operacional
+Escolhemos **Amazon Linux** como sistema operacional. É leve, seguro e altamente otimizado para a AWS!
+
+![OS Selection](assets/08-mais-config-AMI.jpeg)
+
+#### Passo 9: Tipo de Instância
+Selecionamos **t2.micro** - perfeito para aprendizado e possui acesso à **free tier** da AWS. Para produção, você escalaria para tipos maiores conforme a demanda.
+
+![Instance Type t2.micro](assets/09-t2-AMI.jpeg)
+
+#### Passo 10: Security Group da AMI
+Criamos um **Security Group** específico para servir como camada de segurança a nível de instância. Este SG permite:
+- Tráfego HTTP/HTTPS do ALB
+- SSH apenas da Bastion Host
+- Todas as respostas saem livremente
+
+![Security Group Configuration](assets/10-SG-AMI.jpeg)
+
+#### Passo 11: Script de User Data
+Aqui vem o segredo da pré-configuração! Adicionamos um script que executa automaticamente quando a instância inicia:
+
+```bash
+#!/bin/bash
+# Atualizar pacotes do sistema
+yum update -y
+
+# Instalar Apache Web Server
+yum install httpd -y
+
+# Iniciar serviço HTTP
+systemctl start httpd
+systemctl enable httpd
+
+# Criar página HTML personalizada
+INSTANCE_ID=$(ec2-metadata --instance-id | cut -d " " -f 2)
+cat > /var/www/html/index.html <<EOF
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Cluster Auto-Escalável</title>
+</head>
+<body>
+    <h1>Bem-vindo ao Cluster Auto-Escalável!</h1>
+    <p>Instância ID: $INSTANCE_ID</p>
+    <p>Status: Operacional ✅</p>
+</body>
+</html>
+EOF
+```
+
+Este script garante que **toda nova instância criada pelo Auto Scaling já inicia com o Apache rodando**!
+
+![User Data Script](assets/11-Data-AMI.jpeg)
+
+#### Passo 12: AMI Criada com Sucesso! 🎊
+O Launch Template está pronto e será usado pelo Auto Scaling Group para provisionar novas instâncias automaticamente!
+
+![AMI Created Successfully](assets/12-AMI-Criada.jpeg)
+
+---
+
+### 3️⃣ Application Load Balancer
+
+#### Passo 13: Selecionando ALB
+Navegamos até **Load Balancer** e escolhemos o **Application Load Balancer (ALB)**. Este é o "inteligente" do lote - ele analisa cada requisição e sabe exatamente qual instância é a mais apropriada para atendê-la!
+
+![Load Balancer Selection](assets/13-ALB.jpeg)
+
+**Por que ALB?**
+- 🧠 Compreende protocolos HTTP/HTTPS
+- 🎯 Pode rotear por caminho, host, ou porta
+- ⚡ Distribuição inteligente de carga
+- 📊 Métricas detalhadas
+
+#### Passo 14: Configuração Inicial do ALB
+Iniciamos a configuração:
+- **Nome:** Identificador do balanceador
+- ✅ **Voltado para Internet:** SIM! Ele recebe requisições da internet
+- **VPC:** Atribuímos à VPC que criamos
+- **Esquema:** Internet-facing (público)
+
+![ALB Initial Configuration](assets/14-config-ALB.jpeg)
+
+#### Passo 15: Seleção de Subnets Públicas
+Aqui está o ponto crucial: colocamos o ALB nas **subnets públicas**! Por quê?
+
+- 🌐 Precisa receber tráfego da internet
+- 🔀 Precisa distribuir para as instâncias privadas
+- 🛡️ Já está protegido pelo Security Group
+- 🏢 É o gateway entre internet e sua infraestrutura
+
+![Subnet Selection](assets/15-mais-config-ALB.jpeg)
+
+#### Passo 16: Security Group do ALB
+Criamos um Security Group específico para o ALB que:
+- ✅ **Aceita:** Tráfego HTTP (80) e HTTPS (443) de qualquer lugar (0.0.0.0/0)
+- ❌ **Nega:** Tudo o mais
+- 📤 **Permite saída:** Para qualquer destino (necessário para verificar instâncias)
+
+![ALB Security Group](assets/16-SG-ALB-Criado.jpeg)
+
+#### Passo 17: Criando Target Group
+Aqui definimos os **destinos** do ALB - as instâncias EC2 que vão receber o tráfego:
+
+- **Tipo de Alvo:** Instâncias EC2
+- **Protocolo:** HTTP (porta 80)
+- **VPC:** Nossa VPC multi-AZ
+- **Health Check:** Enabled (verificação automática de saúde)
+
+![Target Group Creation](assets/17-Grupo-De-Destino.jpeg)
+
+#### Passo 18: Target Group Criado
+O grupo de destino está pronto. Cada vez que uma requisição chega ao ALB, ele escolhe uma instância deste grupo baseado em:
+- 🏥 Saúde da instância
+- ⚖️ Menor número de conexões ativas
+- 🎯 Algoritmo de round-robin com ponderação
+
+![Target Group Created](assets/18-Grupo-De-Destino-Criado.jpeg)
+
+#### Passo 19: Application Load Balancer Criado! 🎉
+O ALB está operacional! Ele agora tem um DNS público que pode ser usado para acessar suas aplicações. Porém, ainda não temos instâncias - o Auto Scaling criará essas para nós!
+
+![ALB Created Successfully](assets/19-ALB-Criado.jpeg)
+
+---
+
+### 4️⃣ Auto Scaling Group
+
+#### Passo 20: Iniciando Configuração do ASG
+Agora chegamos ao **"herói invisível"** da arquitetura: o **Auto Scaling Group (ASG)**! Este é nosso "socorrista" automático!
+
+![ASG Configuration Start](assets/20-config-ASG.jpeg)
+
+**Configurações aplicadas:**
+- **Nome:** Identificador descritivo
+- **Launch Template:** Aquele que criamos com o Apache pré-configurado
+- **Versão:** Latest (sempre usar a mais recente)
+
+#### Passo 21: Subnets Privadas
+Colocamos o ASG para criar instâncias nas **2 subnets privadas** (uma por AZ):
+
+![ASG Subnet Selection](assets/21-ASG-sub-redes.jpeg)
+
+**Por que subnets privadas?**
+- 🔒 Mais seguras (sem acesso direto da internet)
+- 🛡️ Protegidas pelo ALB na frente
+- 🔄 O ALB roteia o tráfego para elas
+- 📊 Melhor compliance e segurança
+
+**Opção de Balanceamento:** "Melhor esforço equilibrado" para distribuição inteligente entre AZs!
+
+#### Passo 22: Health Check - O Enfermeiro da Infraestrutura 🏥
+Ativamos o **Health Check**, um recurso crítico que:
+
+1. ✅ Verifica a integridade de **cada instância**
+2. 🚨 Se detectar falha:
+   - Avisa ao **ALB** para parar de enviar tráfego
+   - Avisa ao **ASG** para remover a instância
+   - Cria **automaticamente uma nova** baseada na AMI
+3. ⚡ **Durante a transição:** A segunda instância recebe todo o tráfego!
+
+![Health Check Configuration](assets/22-health-cheack-ASG.jpeg)
+
+Isso é **tolerância a falhas automática**! 🎯
+
+#### Passo 23: Política de Escalabilidade
+Este é o coração do auto-scaling! Configuramos:
+
+```
+┌─────────────────────────────────────────┐
+│     Capacidade de Instâncias            │
+├─────────────────────────────────────────┤
+│ Mínima:   2 instâncias                  │
+│ Desejada: 2 instâncias                  │
+│ Máxima:   4 instâncias                  │
+└─────────────────────────────────────────┘
+```
+
+**Política de Dimensionamento:** Monitoramento de objetos baseado em **CPU > 70%**
+
+Isso significa:
+- 📉 CPU abaixo de 70% → Mantém 2 instâncias
+- 🔼 CPU ultrapassa 70% → Cria mais instâncias automaticamente
+- ⬆️ Máximo de 4 instâncias (proteção contra custos altos)
+
+![Scaling Policy](assets/23-ASG-Escalabilidade.jpeg)
+
+#### Passo 24: Auto Scaling Group Criado! 🚀
+O ASG está vivo! Ele criará automaticamente 2 instâncias nas subnets privadas. Essas instâncias rodarão nosso Apache pré-configurado e o ALB começará a rotear tráfego para elas!
+
+![ASG Created Successfully](assets/24-ASG-Criado.jpeg)
+
+---
+
+### 5️⃣ Testes e Validação
+
+#### Passo 25: Bastion Host - O Portão Seguro 🔑
+Uma instância EC2 numa subnet pública que serve como **ponto de acesso seguro** para as instâncias em subnets privadas. Nem você, nem ninguém, acessa as instâncias privadas diretamente - só através da Bastion!
+
+![Bastion Host Created](assets/25-ec2-bastion-criado.jpeg)
+
+**Por que Bastion Host?**
+- 🔒 Single point of access (auditable)
+- 🛡️ Reduz a superfície de ataque
+- 📋 Logs de todas as conexões
+- 🎓 Melhor prática de segurança
+
+#### Passo 26: Conectando na Bastion Host
+Aqui, estabelecemos uma conexão SSH com a Bastion Host usando nosso par de chaves:
+
+```bash
+ssh -i "sua-chave.pem" ec2-user@bastion-public-ip
+```
+
+![Bastion Connection Established](assets/26-conectando-na-ec2-bastion.jpeg)
+
+#### Passo 27: Saltando para Instância Privada
+Daqui, configuramos SSH forwarding para acessar a instância privada:
+
+```bash
+ssh -i "sua-chave.pem" -J ec2-user@bastion-ip ec2-user@private-ip
+```
+
+A Security Group da instância privada foi configurada para aceitar SSH **apenas** da Bastion Host!
+
+![Private Instance Connection](assets/27-da-ec2-bastion-para-ec2-private.jpeg)
+
+#### Passo 28: Teste de Stress de CPU - O Momento da Verdade! ⚡
+
+Dentro da SSH da instância privada, executamos um comando de stress:
+
+```bash
+# Instalar ferramenta de stress
+sudo amazon-linux-extras install epel-y
+sudo yum install stress -y
+
+# Estressar a CPU por 5 minutos
+stress --cpu 2 --timeout 300s
+```
+
+**E então... começou a magia!** 📊
+
+As notificações começaram a surgir no console da AWS, e a mais importante:
+
+### **"Launching a new EC2 Instance"** 🎉
+
+Isso significa que o Auto Scaling Group detectou que a CPU foi além de 70% e **automaticamente iniciou a criação de uma terceira instância**!
+
+![Scaling Notification](assets/28-instancias-sendo-criadas.jpeg)
+
+#### Passo 29: Novas Instâncias Criadas com Sucesso!
+Na aba de **Instâncias EC2**, podemos ver **3 instâncias rodando**:
+- 2 instâncias iniciais (desejadas)
+- 1 nova instância criada automaticamente pelo teste de stress
+
+Todas rodando nosso Apache, gerenciadas pelo ALB! 🚀
+
+![Instances Created](assets/29-instancias-criadas-asg.jpeg)
+
+#### Passo 30: CloudWatch em Tempo Real 📈
+E aqui está a prova final! O **CloudWatch** mostrando:
+- 📊 Gráficos de CPU em tempo real
+- 🔔 Notificações de scaling
+- 📉 Métricas de cada instância
+- ⚙️ Status do Auto Scaling
+
+Tudo funcionando perfeitamente! O CPU subiu, disparou os alarmes, o Auto Scaling reagiu e uma nova instância foi criada automaticamente!
+
+![CloudWatch Dashboard](assets/30-Cloudwatch.jpeg)
+
+---
+
+## 🛠️ Tecnologias Utilizadas
+
+| Componente | Serviço AWS | Função |
+|-----------|-----------|--------|
+| **Rede** | VPC | Rede virtual isolada e multi-AZ |
+| **Sub-redes** | Subnets | Segmentação de rede por AZ |
+| **NAT Gateway** | NAT Gateway | Acesso à internet para instâncias privadas |
+| **Instâncias** | EC2 | Servidores que rodam a aplicação |
+| **Load Balancer** | Application Load Balancer | Distribuição inteligente de tráfego |
+| **Auto Scaling** | Auto Scaling Group | Criação/remoção automática de instâncias |
+| **Monitoramento** | CloudWatch | Métricas e alarmes em tempo real |
+| **Segurança** | Security Groups | Firewall a nível de instância |
+| **Template** | Launch Template | Modelo pré-configurado para EC2 |
+
+---
+
+## 📊 Diagrama de Arquitetura
+
+Você também pode visualizar o diagrama completo no arquivo:
+- 📁 [aws-high-availability-scaling-architecture.drawio](aws-high-availability-scaling-architecture.drawio)
+
+---
+
+## 🎓 Lições Aprendidas
+
+✅ **Multi-AZ é essencial** para alta disponibilidade  
+✅ **ALB é inteligente** e distribui carga eficientemente  
+✅ **Auto Scaling é automático** - cria/remove instâncias conforme demanda  
+✅ **Health Check salva vidas** (e infraestruturas!)  
+✅ **Bastion Host é segurança** contra acessos não autorizados  
+✅ **Subnets privadas** para aplicação, públicas para acesso  
+✅ **CloudWatch mostra tudo** em tempo real  
+
+---
+
+## 🚀 Próximos Passos
+
+Agora que você tem essa arquitetura rodando, considere:
+
+1. 📜 **HTTPS/SSL:** Adicione certificados ACM ao ALB
+2. 📧 **SNS/SQS:** Integre filas para processamento assíncrono
+3. 💾 **RDS:** Adicione banco de dados gerenciado
+4. 🔍 **Route 53:** Configure DNS customizado
+5. 🔐 **WAF:** Adicione Web Application Firewall
+6. 📦 **S3:** Integre armazenamento de objetos
+7. 🎯 **OpsWorks/CodeDeploy:** CI/CD para deploys automáticos
+
+---
+
+## 📞 Suporte
+
+Se encontrar problemas:
+
+1. ✅ Verifique Security Groups (são muito restritivos!)
+2. ✅ Verifique Health Check status no Target Group
+3. ✅ Analise logs do CloudWatch
+4. ✅ Confirme que o user data executou (SSH na instância)
+5. ✅ Verifique se a instância tem acesso à internet via NAT Gateway
+
+---
+
+## 🎉 Conclusão
+
+Você agora possui uma **arquitetura cloud altamente disponível, tolerante a falhas e automaticamente escalável**! 
+
+Este projeto demonstra princípios fundamentais de:
+- ☁️ Cloud Computing
+- 🔄 DevOps e IaC (Infrastructure as Code)
+- 📊 Monitoramento e Observabilidade
+- 🔒 Segurança em Profundidade
+
+**Parabéns! 🏆 Seu cluster auto-escalável está vivo e funcionando!**
+
+---
+
+*Documentação criada em: 28 de dezembro de 2025*  
+*Projeto: Cluster Auto-Escalável na AWS*  
+*Status: ✅ Em Produção!*
